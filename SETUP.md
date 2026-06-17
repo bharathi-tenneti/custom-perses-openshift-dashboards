@@ -312,19 +312,18 @@ EOF
 
 ---
 
-## Phase 7 — Apply the Dashboard
+## Phase 7 — Apply the Dashboards
 
 The dashboard defines two `StatChart` panels — `cluster_operator_conditions` from the `dynamic-fleet-thanos-datasource`. It also has a `TextVariable` for the console base URL used in panel deep-links.
 
 ```bash
-oc apply -f perses-dashboards/
+oc apply -f base/kustomize.yaml
 ```
 
-This creates `PersesDashboard/my-new-perses-dashboard` in namespace `openshift-cluster-observability-operator`.
 
 Verify it is live:
 ```bash
-oc get persesdashboard my-new-perses-dashboard -n openshift-cluster-observability-operator
+oc get persesdashboards -n openshift-cluster-observability-operator
 ```
 
 ---
@@ -344,6 +343,6 @@ oc get persesdashboard my-new-perses-dashboard -n openshift-cluster-observabilit
 | `RoleBinding` | `perses-secret-reader` | `openshift-cluster-observability-operator` | Binds secret-reader role to `perses-sa` |
 | `ClusterRole` | `perses-custom-observability-reader` | cluster | Lets Perses read MCO/ACM CRDs |
 | `ClusterRoleBinding` | `perses-custom-observability-binding` | cluster | Binds above to Perses SAs + authenticated users |
-| `PersesDashboard` | `my-new-perses-dashboard` | `openshift-cluster-observability-operator` | The dashboard itself |
+| `PersesDashboard` | `openshift-cluster-observability-operator` | The dashboard itself |
 
-The dashboard is visible in the OpenShift Console under **Observe → Dashboards** once all resources are in place.
+The dashboards are visible in the OpenShift Console under **RHACM -> Observe -> Dashboards** once all resources are in place.

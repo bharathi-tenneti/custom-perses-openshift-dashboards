@@ -9,7 +9,7 @@ The dashboards are deployed as Kubernetes CRDs in the `open-cluster-management-o
 ## Dashboard Collection
 
 # Cluster-Operator-overview
- **Cluster Operators Overview** (`operator-overview.yaml`)
+- **Cluster Operators Overview** (`operator-overview.yaml`)
   - OpenShift cluster operator status monitoring
   - Visual representation of operator health (Available, Progressing, Degraded)
 
