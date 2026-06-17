@@ -1,0 +1,31 @@
+apiVersion: observability.openshift.io/v1alpha1
+kind: UIPlugin
+metadata:
+  name: monitoring
+spec:
+  monitoring:
+    acm:
+      alertmanager:
+        url: 'http://observability-alertmanager.open-cluster-management-observability.svc.cluster.local:9093'
+      enabled: true
+      thanosQuerier:
+        url: 'http://observability-thanos-query.open-cluster-management-observability.svc.cluster.local:9090'
+    perses:
+      enabled: true
+  type: Monitoring
+---
+
+apiVersion: perses.dev/v1alpha2
+kind: PersesDatasource
+metadata:
+  name: dynamic-fleet-thanos-datasource
+  namespace: openshift-cluster-observability-operator
+spec:
+  config:
+    default: false
+    display:
+      name: "ACM MultiCluster Thanos Engine"
+    plugin:
+      kind: PrometheusDatasource
+      spec:
+        directUrl: "http://observability-thanos-query-frontend.open-cluster-management-observability.svc.cluster.local:9090"

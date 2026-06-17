@@ -1,0 +1,408 @@
+apiVersion: perses.dev/v1alpha2
+kind: PersesDashboard
+metadata:
+  name: acm-clusters-overview
+  namespace: openshift-cluster-observability-operator
+spec:
+  config:
+    display:
+      name: "ACM - Cluster Health Overview"
+      description: "Fleet-wide cluster health. Select a cluster from the dropdown to drill in."
+    duration: 1h
+    variables:
+      # Cluster picker — populated from live metric data so it automatically
+      # includes every managed cluster that is reporting to RHACM Observability.
+      - kind: ListVariable
+        spec:
+          allowAllValue: false
+          allowMultiple: false
+          display:
+            name: Cluster
+          name: cluster
+          plugin:
+            kind: PrometheusLabelValuesVariable
+            spec:
+              datasource:
+                kind: PrometheusDatasource
+                name: dynamic-fleet-thanos-datasource
+              labelName: cluster
+              matchers:
+                - cluster_operator_conditions
+          sort: alphabetical-asc
+
+      # Resolves to the OpenShift Console base URL for the selected cluster.
+      # console_url{cluster="...", url="https://..."} is a gauge RHACM Observability
+      # scrapes from every managed cluster; the `url` label carries the full URL.
+      - kind: ListVariable
+        spec:
+          allowAllValue: false
+          allowMultiple: false
+          display:
+            name: Console URL
+            hidden: true
+          name: console
+          plugin:
+            kind: PrometheusLabelValuesVariable
+            spec:
+              datasource:
+                kind: PrometheusDatasource
+                name: dynamic-fleet-thanos-datasource
+              labelName: url
+              matchers:
+                - 'console_url{cluster="$cluster"}'
+
+    panels:
+
+      # ------------------------------------------------------------------
+      # Core Platform
+      # Each tile = one component. Green = healthy, yellow = degraded ratio,
+      # red = fully down.
+      # ------------------------------------------------------------------
+      core_platform:
+        kind: Panel
+        spec:
+          display:
+            name: "Core Platform — $cluster"
+          plugin:
+            kind: StatChart
+            spec:
+              calculation: last
+              colorMode: background_solid
+              format:
+                unit: decimal
+              metricLabel: check
+              sparkline: {}
+              valueFontSize: 10
+              mappings:
+                - kind: Value
+                  spec:
+                    value: "0"
+                    result: { color: "#f2495c", value: "Down" }
+                - kind: Value
+                  spec:
+                    value: "1"
+                    result: { color: "#73bf69", value: "OK" }
+              thresholds:
+                steps:
+                  - { color: "#f2495c", value: 0 }
+                  - { color: "#fade2a", value: 0.5 }
+                  - { color: "#73bf69", value: 0.999 }
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "API Server"
+                    query: 'sum(up{job="apiserver", cluster="$cluster"} == 1) / count(up{job="apiserver", cluster="$cluster"})'
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "ETCD"
+                    query: 'sum(up{job="etcd", cluster="$cluster"} == 1) / count(up{job="etcd", cluster="$cluster"})'
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "Kube Controller"
+                    query: 'sum(up{job=~"controller-manager|kube-controller-manager", cluster="$cluster"} == 1) / count(up{job=~"controller-manager|kube-controller-manager", cluster="$cluster"})'
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "Kube Scheduler"
+                    query: 'sum(up{job="scheduler", cluster="$cluster"} == 1) / count(up{job="scheduler", cluster="$cluster"})'
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "ClusterOperators"
+                    query: 'count(cluster_operator_conditions{condition=~"Degraded|Progressing", cluster="$cluster"} == 0) / count(cluster_operator_conditions{condition=~"Degraded|Progressing", cluster="$cluster"})'
+          links:
+            - name: "Cluster Operators"
+              url: "${console}/settings/cluster/clusteroperators"
+              renderVariables: true
+              targetBlank: true
+
+      # ------------------------------------------------------------------
+      # Nodes — one tile per node
+      # Shows Node Ready and Schedulable status broken down per node so you
+      # can immediately see which node is unhealthy.
+      # ------------------------------------------------------------------
+      node_ready:
+        kind: Panel
+        spec:
+          display:
+            name: "Node Ready — $cluster"
+          plugin:
+            kind: StatChart
+            spec:
+              calculation: last
+              colorMode: background_solid
+              format:
+                unit: decimal
+              metricLabel: node
+              sparkline: {}
+              valueFontSize: 10
+              mappings:
+                - kind: Value
+                  spec:
+                    value: "0"
+                    result: { color: "#f2495c", value: "Not Ready" }
+                - kind: Value
+                  spec:
+                    value: "1"
+                    result: { color: "#73bf69", value: "Ready" }
+              thresholds:
+                steps:
+                  - { color: "#f2495c", value: 0 }
+                  - { color: "#73bf69", value: 1 }
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "{{ node }}"
+                    query: 'kube_node_status_condition{condition="Ready", status="true", cluster="$cluster"}'
+          links:
+            - name: "Nodes"
+              url: "${console}/k8s/cluster/nodes"
+              renderVariables: true
+              targetBlank: true
+
+      # ------------------------------------------------------------------
+      # Node Pressure — one tile per node
+      # Green = no pressure on any condition.
+      # Red = DiskPressure, MemoryPressure, or PIDPressure is active.
+      # min() across all 3 pressure types: if any fires the node goes red.
+      # ------------------------------------------------------------------
+      node_pressure:
+        kind: Panel
+        spec:
+          display:
+            name: "Node Pressure — $cluster"
+          plugin:
+            kind: StatChart
+            spec:
+              calculation: last
+              colorMode: background_solid
+              format:
+                unit: decimal
+              metricLabel: node
+              sparkline: {}
+              valueFontSize: 10
+              mappings:
+                - kind: Value
+                  spec:
+                    value: "0"
+                    result: { color: "#f2495c", value: "Under Pressure" }
+                - kind: Value
+                  spec:
+                    value: "1"
+                    result: { color: "#73bf69", value: "OK" }
+              thresholds:
+                steps:
+                  - { color: "#f2495c", value: 0 }
+                  - { color: "#73bf69", value: 1 }
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "{{ node }}"
+                    # 1 - pressure_value: converts 0 (no pressure) → 1 (OK),
+                    # 1 (pressure active) → 0 (red). min() across all 3
+                    # pressure types gives worst case per node.
+                    query: 'min by (node) (1 - kube_node_status_condition{condition=~"DiskPressure|MemoryPressure|PIDPressure", status="true", cluster="$cluster"})'
+          links:
+            - name: "Nodes"
+              url: "${console}/k8s/cluster/nodes"
+              renderVariables: true
+              targetBlank: true
+
+      # ------------------------------------------------------------------
+      # Workloads — key namespaces
+      # Each tile = one namespace. 1 = all pods healthy, <1 = some failing.
+      # ------------------------------------------------------------------
+      workloads:
+        kind: Panel
+        spec:
+          display:
+            name: "Workloads — $cluster"
+          plugin:
+            kind: StatChart
+            spec:
+              calculation: last
+              colorMode: background_solid
+              format:
+                unit: decimal
+              metricLabel: namespace
+              sparkline: {}
+              valueFontSize: 10
+              mappings:
+                - kind: Value
+                  spec:
+                    value: "0"
+                    result: { color: "#f2495c", value: "Degraded" }
+                - kind: Value
+                  spec:
+                    value: "1"
+                    result: { color: "#73bf69", value: "OK" }
+              thresholds:
+                steps:
+                  - { color: "#f2495c", value: 0 }
+                  - { color: "#fade2a", value: 0.5 }
+                  - { color: "#73bf69", value: 0.999 }
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "Ingress"
+                    query: 'count(kube_pod_status_phase{namespace="openshift-ingress", phase=~"Failed|Pending", cluster="$cluster"} == 0) / count(kube_pod_status_phase{namespace="openshift-ingress", phase=~"Failed|Pending", cluster="$cluster"})'
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "Console"
+                    query: 'count(kube_pod_status_phase{namespace="openshift-console", phase=~"Failed|Pending", cluster="$cluster"} == 0) / count(kube_pod_status_phase{namespace="openshift-console", phase=~"Failed|Pending", cluster="$cluster"})'
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "Authentication"
+                    query: 'count(kube_pod_status_phase{namespace="openshift-authentication", phase=~"Failed|Pending", cluster="$cluster"} == 0) / count(kube_pod_status_phase{namespace="openshift-authentication", phase=~"Failed|Pending", cluster="$cluster"})'
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "DNS"
+                    query: 'count(kube_pod_status_phase{namespace="openshift-dns", phase=~"Failed|Pending", cluster="$cluster"} == 0) / count(kube_pod_status_phase{namespace="openshift-dns", phase=~"Failed|Pending", cluster="$cluster"})'
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "Pipelines"
+                    query: 'count(kube_pod_status_phase{namespace="openshift-pipelines", phase=~"Failed|Pending", cluster="$cluster"} == 0) / count(kube_pod_status_phase{namespace="openshift-pipelines", phase=~"Failed|Pending", cluster="$cluster"})'
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "GitOps"
+                    query: 'count(kube_pod_status_phase{namespace="openshift-gitops", phase=~"Failed|Pending", cluster="$cluster"} == 0) / count(kube_pod_status_phase{namespace="openshift-gitops", phase=~"Failed|Pending", cluster="$cluster"})'
+          links:
+            - name: "Workloads"
+              url: "${console}/k8s/all-namespaces/core~v1~Pod"
+              renderVariables: true
+              targetBlank: true
+
+      # ------------------------------------------------------------------
+      # Alerts — firing critical alerts broken down by alertname
+      # Each tile = one firing critical alert. No tiles = all clear.
+      # ------------------------------------------------------------------
+      critical_alerts:
+        kind: Panel
+        spec:
+          display:
+            name: "Critical Alerts — $cluster"
+          plugin:
+            kind: StatChart
+            spec:
+              calculation: last
+              colorMode: background_solid
+              format:
+                unit: decimal
+              metricLabel: alertname
+              sparkline: {}
+              valueFontSize: 10
+              thresholds:
+                steps:
+                  - { color: "#f2495c", value: 0 }
+                  - { color: "#73bf69", value: 1 }
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    seriesNameFormat: "{{ alertname }}"
+                    query: 'ALERTS{alertstate="firing", severity="critical", cluster="$cluster"}'
+          links:
+            - name: "Alerting"
+              url: "${console}/monitoring/alerts"
+              renderVariables: true
+              targetBlank: true
+
+    layouts:
+      - kind: Grid
+        spec:
+          display:
+            title: Core Platform
+          items:
+            - x: 0
+              "y": 0
+              width: 24
+              height: 6
+              content:
+                $ref: "#/spec/panels/core_platform"
+      - kind: Grid
+        spec:
+          display:
+            title: Nodes
+          items:
+            - x: 0
+              "y": 0
+              width: 12
+              height: 6
+              content:
+                $ref: "#/spec/panels/node_ready"
+            - x: 12
+              "y": 0
+              width: 12
+              height: 6
+              content:
+                $ref: "#/spec/panels/node_pressure"
+      - kind: Grid
+        spec:
+          display:
+            title: Workloads & Alerts
+          items:
+            - x: 0
+              "y": 0
+              width: 18
+              height: 6
+              content:
+                $ref: "#/spec/panels/workloads"
+            - x: 18
+              "y": 0
+              width: 6
+              height: 6
+              content:
+                $ref: "#/spec/panels/critical_alerts"

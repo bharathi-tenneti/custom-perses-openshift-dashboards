@@ -1,0 +1,145 @@
+apiVersion: perses.dev/v1alpha2
+kind: PersesDashboard
+metadata:
+  name: my-new-perses-dashboard
+  namespace: openshift-cluster-observability-operator
+spec:
+  config:
+    display:
+      name: "Cluster - Operators"
+      description: "Cloud-native multi-cluster operator overview tracking via RHACM Observability mesh"
+    duration: 6h
+    variables:
+      # Cluster picker — mirrors Grafana's $cluster query variable.
+      # Pulls the `cluster` label from cluster_operator_conditions so the list
+      # only shows clusters that actually have operator metrics.
+      - kind: ListVariable
+        spec:
+          allowAllValue: false
+          allowMultiple: false
+          display:
+            name: Cluster
+          name: cluster
+          plugin:
+            kind: PrometheusLabelValuesVariable
+            spec:
+              datasource:
+                kind: PrometheusDatasource
+                name: dynamic-fleet-thanos-datasource
+              labelName: cluster
+              matchers:
+                - cluster_operator_conditions
+          sort: alphabetical-asc
+
+      # Dynamic console URL — mirrors Grafana's $console query variable.
+      # RHACM Observability publishes console_url{url="https://...", cluster="..."}
+      # as a gauge; pulling the `url` label gives the correct console base URL
+      # for whichever cluster is selected above.
+      - kind: ListVariable
+        spec:
+          allowAllValue: false
+          allowMultiple: false
+          display:
+            name: Console URL
+            hidden: true
+          name: console
+          plugin:
+            kind: PrometheusLabelValuesVariable
+            spec:
+              datasource:
+                kind: PrometheusDatasource
+                name: dynamic-fleet-thanos-datasource
+              labelName: url
+              matchers:
+                - 'console_url{cluster="$cluster"}'
+
+    panels:
+      "operator_matrix_panel":
+        kind: Panel
+        spec:
+          display:
+            name: "Operator status"
+          plugin:
+            kind: StatChart
+            spec:
+              calculation: last
+              colorMode: background_solid
+              format:
+                unit: decimal
+              mappings:
+                - kind: Value
+                  spec:
+                    result: { color: "#73bf69", value: "Available" }
+                    value: "1"
+                - kind: Value
+                  spec:
+                    result: { color: "#fade2a", value: "Progressing" }
+                    value: "2"
+                - kind: Value
+                  spec:
+                    result: { color: "#73bf69", value: "Progressing and Available" }
+                    value: "3"
+                - kind: Value
+                  spec:
+                    result: { color: "#f2495c", value: "Degraded" }
+                    value: "4"
+                - kind: Value
+                  spec:
+                    result: { color: "#ff9830", value: "Degraded but Available" }
+                    value: "5"
+                - kind: Value
+                  spec:
+                    result: { color: "#ff9830", value: "Degraded but Progressing" }
+                    value: "6"
+              metricLabel: " name "
+              sparkline: {}
+              thresholds:
+                steps:
+                  - color: "#73bf69"
+                    value: 0
+                  - color: "#73bf69"
+                    value: 1
+                  - color: "#EAB839"
+                    value: 2
+                  - color: "#f2495c"
+                    value: 4
+              valueFontSize: 10
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource:
+                      kind: PrometheusDatasource
+                      name: dynamic-fleet-thanos-datasource
+                    minStep: ""
+                    query: |
+                      sum by (name, cluster) (
+                        (cluster_operator_conditions{cluster=~"$cluster", condition="Degraded"} == 1) * 4 or
+                        (cluster_operator_conditions{cluster=~"$cluster", condition="Progressing"} == 1) * 2 or
+                        (cluster_operator_conditions{cluster=~"$cluster", condition="Available"} == 1) * 1
+                      )
+                    seriesNameFormat: "{{ name }}"
+          # Panel-level link to the cluster operators list page.
+          # NOTE: Perses StatChart does not support per-cell links
+          # (Grafana's ${__field.labels.name} equivalent), so individual
+          # operator deep-links are not yet possible.
+          links:
+            - name: "Cluster Operators"
+              url: "${console}/settings/cluster/clusteroperators"
+              renderVariables: true
+              targetBlank: true
+
+    layouts:
+      - kind: Grid
+        spec:
+          display:
+            title: Operations Grid View
+          items:
+            - x: 0
+              "y": 0
+              width: 24
+              height: 8
+              content:
+                $ref: "#/spec/panels/operator_matrix_panel"
