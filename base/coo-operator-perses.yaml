@@ -9,7 +9,6 @@ metadata:
   name: cluster-observability-operator-group
   namespace: openshift-cluster-observability-operator
 spec:
-  # LEAVE EMPTY: This instructs OLM to run the operator in AllNamespaces mode
   targetNamespaces: [] 
 ---
 apiVersion: operators.coreos.com/v1alpha1
