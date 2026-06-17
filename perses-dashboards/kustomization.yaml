@@ -3,3 +3,4 @@ kind: Kustomization
 
 resources:
   - operator-overview.yaml
+  - acm-clusters-overview.yaml
