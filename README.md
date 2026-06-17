@@ -13,4 +13,9 @@ The dashboards are deployed as Kubernetes CRDs in the `open-cluster-management-o
   - OpenShift cluster operator status monitoring
   - Visual representation of operator health (Available, Progressing, Degraded)
 
-
+- **Custom Cluster Overview** (`custom-overview.yaml`)
+  - Comprehensive cluster health monitoring
+  - Node status, resource utilization, and component health
+  - Master nodes, infra nodes, and worker node status
+  - Kubernetes control plane components (ETCD, API server, scheduler)
+  - OpenShift-specific components (console, OAuth, DNS)
