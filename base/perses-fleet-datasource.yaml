@@ -10,7 +10,6 @@ metadata:
   name: dynamic-fleet-thanos-secret
   namespace: openshift-cluster-observability-operator
   annotations:
-    # This annotation tells OpenShift to automatically populate this secret with a long-lived SA token
     kubernetes.io/service-account.name: dynamic-fleet-thanos-sa
 type: kubernetes.io/service-account-token
 
@@ -39,7 +38,6 @@ metadata:
 spec:
   client:
     tls:
-      # Securely handles the cluster internal Service CA validation chain
       caCert:
         certPath: /ca/service-ca.crt
         type: file
@@ -47,41 +45,13 @@ spec:
   config:
     default: false
     display:
-      name: "ACM MultiCluster Thanos Engine"
+      name: ACM MultiCluster Thanos Engine
     plugin:
       kind: PrometheusDatasource
       spec:
         proxy:
           kind: HTTPProxy
           spec:
-            # Passes the service account oauth handshake token
-            secret: dynamic-fleet-thanos-secret
-            # CORRECT ELEMENT: inside the proxy block, use 'url' instead of 'directUrl'
-            url: 'https://observability-thanos-query-frontend.open-cluster-management-observability.svc.cluster.local:9092'
+            secret: dynamic-fleet-thanos-datasource-secret
+            url: 'https://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8443'
 
----
-
-apiVersion: perses.dev/v1alpha2
-kind: PersesDatasource
-metadata:
-  name: accelerators-fleet-thanos-querier-datasource
-  namespace: openshift-cluster-observability-operator
-spec:
-  client:
-    tls:
-      caCert:
-        certPath: /ca/service-ca.crt
-        type: file
-      enable: true
-  config:
-    default: false
-    display:
-      name: "ACM Fleet Thanos Querier"
-    plugin:
-      kind: PrometheusDatasource
-      spec:
-        proxy:
-          kind: HTTPProxy
-          spec:
-            secret: dynamic-fleet-thanos-secret
-            url: 'https://observability-thanos-query-frontend.open-cluster-management-observability.svc.cluster.local:9090'
