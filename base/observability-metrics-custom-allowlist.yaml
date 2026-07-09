@@ -1,0 +1,21 @@
+# Adds metrics to RHACM Observability's collection allowlist that aren't
+# federated by default. The Workloads panel in acm-clusters-overview.yaml
+# needs both of these to detect per-namespace pod health and crash loops:
+#   - kube_pod_status_ready: per-pod baseline used to count total pods per namespace
+#   - kube_pod_container_status_waiting_reason: used to detect CrashLoopBackOff
+#
+# Apply on the HUB cluster only (namespace open-cluster-management-observability).
+# Not wired into base/kustomization.yaml: that kustomization forces every
+# resource into the openshift-cluster-observability-operator namespace, which
+# would break this ConfigMap's target namespace. Apply it separately:
+#   oc apply -f base/observability-metrics-custom-allowlist.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: observability-metrics-custom-allowlist
+  namespace: open-cluster-management-observability
+data:
+  metrics_list.yaml: |
+    names:
+      - kube_pod_status_ready
+      - kube_pod_container_status_waiting_reason

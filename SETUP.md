@@ -84,6 +84,32 @@ oc scale statefulset observability-thanos-store-memcached -n open-cluster-manage
 oc scale deployment observability-rbac-query-proxy -n open-cluster-management-observability --replicas=1
 ```
 
+**1.7 — Add custom metrics to the collection allowlist**
+
+RHACM Observability only federates a curated set of metrics from each managed cluster by default (e.g. `cluster_operator_conditions`, `up`, `kube_node_status_condition`). The Workloads panel in `acm-clusters-overview.yaml` needs two metrics that aren't on that default list — `kube_pod_status_ready` (per-namespace pod count baseline) and `kube_pod_container_status_waiting_reason` (detects `CrashLoopBackOff`). Without this, the Workloads panel shows "No Data", or worse, shows every namespace as healthy even when a pod is crash-looping.
+
+Save as [base/observability-metrics-custom-allowlist.yaml](base/observability-metrics-custom-allowlist.yaml) and apply on the hub:
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: observability-metrics-custom-allowlist
+  namespace: open-cluster-management-observability
+data:
+  metrics_list.yaml: |
+    names:
+      - kube_pod_status_ready
+      - kube_pod_container_status_waiting_reason
+```
+```bash
+oc apply -f base/observability-metrics-custom-allowlist.yaml
+```
+
+Each managed cluster's `metrics-collector` pod (in `open-cluster-management-addon-observability`) restarts to pick up the new allowlist — this can take a few minutes. You can confirm it restarted recently with:
+```bash
+oc get pods -n open-cluster-management-addon-observability -l component=metrics-collector
+```
+
 ---
 
 ## Phase 2 — Install the Cluster Observability Operator (COO)
@@ -317,7 +343,7 @@ EOF
 The dashboard defines two `StatChart` panels — `cluster_operator_conditions` from the `dynamic-fleet-thanos-datasource`. It also has a `TextVariable` for the console base URL used in panel deep-links.
 
 ```bash
-oc apply -f base/kustomize.yaml
+oc apply -k base
 ```
 
 

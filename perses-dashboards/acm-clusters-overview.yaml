@@ -235,8 +235,8 @@ spec:
               targetBlank: true
 
       # ------------------------------------------------------------------
-      # Workloads — key namespaces
-      # Each tile = one namespace. 1 = all pods healthy, <1 = some failing.
+      # Workloads — one tile per namespace, discovered dynamically.
+      # 1 = all pods in that namespace healthy, <1 = some crash-looping.
       # ------------------------------------------------------------------
       workloads:
         kind: Panel
@@ -274,48 +274,8 @@ spec:
                   kind: PrometheusTimeSeriesQuery
                   spec:
                     datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
-                    seriesNameFormat: "Ingress"
-                    query: 'count(kube_pod_status_phase{namespace="openshift-ingress", phase=~"Failed|Pending", cluster="$cluster"} == 0) / count(kube_pod_status_phase{namespace="openshift-ingress", phase=~"Failed|Pending", cluster="$cluster"})'
-            - kind: TimeSeriesQuery
-              spec:
-                plugin:
-                  kind: PrometheusTimeSeriesQuery
-                  spec:
-                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
-                    seriesNameFormat: "Console"
-                    query: 'count(kube_pod_status_phase{namespace="openshift-console", phase=~"Failed|Pending", cluster="$cluster"} == 0) / count(kube_pod_status_phase{namespace="openshift-console", phase=~"Failed|Pending", cluster="$cluster"})'
-            - kind: TimeSeriesQuery
-              spec:
-                plugin:
-                  kind: PrometheusTimeSeriesQuery
-                  spec:
-                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
-                    seriesNameFormat: "Authentication"
-                    query: 'count(kube_pod_status_phase{namespace="openshift-authentication", phase=~"Failed|Pending", cluster="$cluster"} == 0) / count(kube_pod_status_phase{namespace="openshift-authentication", phase=~"Failed|Pending", cluster="$cluster"})'
-            - kind: TimeSeriesQuery
-              spec:
-                plugin:
-                  kind: PrometheusTimeSeriesQuery
-                  spec:
-                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
-                    seriesNameFormat: "DNS"
-                    query: 'count(kube_pod_status_phase{namespace="openshift-dns", phase=~"Failed|Pending", cluster="$cluster"} == 0) / count(kube_pod_status_phase{namespace="openshift-dns", phase=~"Failed|Pending", cluster="$cluster"})'
-            - kind: TimeSeriesQuery
-              spec:
-                plugin:
-                  kind: PrometheusTimeSeriesQuery
-                  spec:
-                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
-                    seriesNameFormat: "Pipelines"
-                    query: 'count(kube_pod_status_phase{namespace="openshift-pipelines", phase=~"Failed|Pending", cluster="$cluster"} == 0) / count(kube_pod_status_phase{namespace="openshift-pipelines", phase=~"Failed|Pending", cluster="$cluster"})'
-            - kind: TimeSeriesQuery
-              spec:
-                plugin:
-                  kind: PrometheusTimeSeriesQuery
-                  spec:
-                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
-                    seriesNameFormat: "GitOps"
-                    query: 'count(kube_pod_status_phase{namespace="openshift-gitops", phase=~"Failed|Pending", cluster="$cluster"} == 0) / count(kube_pod_status_phase{namespace="openshift-gitops", phase=~"Failed|Pending", cluster="$cluster"})'
+                    seriesNameFormat: "{{ namespace }}"
+                    query: '1 - ((count by (namespace) (max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff", cluster="$cluster"}[15m]) == 1) or (count by (namespace) (kube_pod_status_ready{condition="true", cluster="$cluster"}) * 0)) / count by (namespace) (kube_pod_status_ready{condition="true", cluster="$cluster"}))'
           links:
             - name: "Workloads"
               url: "${console}/k8s/all-namespaces/core~v1~Pod"
