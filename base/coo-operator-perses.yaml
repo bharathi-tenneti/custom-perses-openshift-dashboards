@@ -22,21 +22,3 @@ spec:
   source: redhat-operators
   sourceNamespace: openshift-marketplace
   installPlanApproval: Automatic
-
----
-
-apiVersion: observability.openshift.io/v1alpha1
-kind: UIPlugin
-metadata:
-  name: monitoring
-spec:
-  monitoring:
-    acm:
-      alertmanager:
-        url: 'http://observability-alertmanager.open-cluster-management-observability.svc.cluster.local:9093'
-      enabled: true
-      thanosQuerier:
-        url: 'http://observability-thanos-query.open-cluster-management-observability.svc.cluster.local:9090'
-    perses:
-      enabled: true
-  type: Monitoring

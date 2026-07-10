@@ -1,8 +1,13 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: openshift-cluster-observability-operator
-
+# No blanket `namespace:` transformer: these resources deliberately span
+# multiple scopes — cluster-scoped (PersesGlobalDatasource),
+# open-cluster-management-observability (ScrapeConfig), and
+# openshift-cluster-observability-operator (dashboards, via their own
+# explicit metadata.namespace). A single override would force the wrong
+# namespace onto at least one of them.
 resources:
-  - perses-fleet-datasource-rbac.yaml
+  - dynamic-fleet-thanos-datasource.yaml
+  - acm-clusters-overview-custom-metrics-scrapeconfig.yaml
   - ../perses-dashboards/

@@ -54,56 +54,46 @@ spec:
                 - 'console_url{cluster="$cluster"}'
 
     panels:
+      # Table instead of one tile per operator: a typical OpenShift cluster
+      # has 30+ ClusterOperators, which turns a StatChart tile grid into an
+      # unscrollable wall (same reasoning as the Nodes/Workloads/Alerts
+      # panels in acm-clusters-overview.yaml).
       "operator_matrix_panel":
         kind: Panel
         spec:
           display:
             name: "Operator status"
           plugin:
-            kind: StatChart
+            kind: Table
             spec:
-              calculation: last
-              colorMode: background_solid
-              format:
-                unit: decimal
-              mappings:
-                - kind: Value
-                  spec:
-                    result: { color: "#73bf69", value: "Available" }
-                    value: "1"
-                - kind: Value
-                  spec:
-                    result: { color: "#fade2a", value: "Progressing" }
-                    value: "2"
-                - kind: Value
-                  spec:
-                    result: { color: "#73bf69", value: "Progressing and Available" }
-                    value: "3"
-                - kind: Value
-                  spec:
-                    result: { color: "#f2495c", value: "Degraded" }
-                    value: "4"
-                - kind: Value
-                  spec:
-                    result: { color: "#ff9830", value: "Degraded but Available" }
-                    value: "5"
-                - kind: Value
-                  spec:
-                    result: { color: "#ff9830", value: "Degraded but Progressing" }
-                    value: "6"
-              metricLabel: " name "
-              sparkline: {}
-              thresholds:
-                steps:
-                  - color: "#73bf69"
-                    value: 0
-                  - color: "#73bf69"
-                    value: 1
-                  - color: "#EAB839"
-                    value: 2
-                  - color: "#f2495c"
-                    value: 4
-              valueFontSize: 10
+              columnSettings:
+                - name: name
+                  header: Operator
+                - name: cluster
+                  hide: true
+                - name: value
+                  header: Status
+                  cellSettings:
+                    - condition: { kind: Value, spec: { value: "1" } }
+                      text: "Available"
+                      backgroundColor: "#73bf69"
+                    - condition: { kind: Value, spec: { value: "2" } }
+                      text: "Progressing"
+                      backgroundColor: "#fade2a"
+                    - condition: { kind: Value, spec: { value: "3" } }
+                      text: "Progressing and Available"
+                      backgroundColor: "#73bf69"
+                    - condition: { kind: Value, spec: { value: "4" } }
+                      text: "Degraded"
+                      backgroundColor: "#f2495c"
+                    - condition: { kind: Value, spec: { value: "5" } }
+                      text: "Degraded but Available"
+                      backgroundColor: "#ff9830"
+                    - condition: { kind: Value, spec: { value: "6" } }
+                      text: "Degraded but Progressing"
+                      backgroundColor: "#ff9830"
+                - name: timestamp
+                  hide: true
           queries:
             - kind: TimeSeriesQuery
               spec:
@@ -120,11 +110,12 @@ spec:
                         (cluster_operator_conditions{cluster=~"$cluster", condition="Progressing"} == 1) * 2 or
                         (cluster_operator_conditions{cluster=~"$cluster", condition="Available"} == 1) * 1
                       )
-                    seriesNameFormat: "{{ name }}"
-          # Panel-level link to the cluster operators list page.
-          # NOTE: Perses StatChart does not support per-cell links
-          # (Grafana's ${__field.labels.name} equivalent), so individual
-          # operator deep-links are not yet possible.
+          # Panel-level link to the cluster operators list page. Table panels
+          # support a per-column dataLink field, which could point each row
+          # at its own operator's console page — not done here since it
+          # needs verifying whether dataLink can reference the row's own
+          # cell value (e.g. the operator name) rather than only dashboard
+          # variables like $console/$cluster.
           links:
             - name: "Cluster Operators"
               url: "${console}/settings/cluster/clusteroperators"

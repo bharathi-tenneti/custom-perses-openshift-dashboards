@@ -1,6 +1,11 @@
 # Tutorial: Setting Up `my-new-perses-dashboard` on OpenShift
 
-This dashboard shows `cluster_operator_conditions` across `local-cluster` and `cluster2` using RHACM's Thanos as the data source, rendered in Perses via the Cluster Observability Operator.
+This dashboard shows fleet-wide cluster health across `local-cluster` and every managed cluster,
+using RHACM's multicluster observability add-on (MCOA) as the metrics backend, rendered in Perses
+via the Cluster Observability Operator (COO).
+
+MCOA's Perses integration is Technology Preview. Validated end-to-end against an RHACM 2.17-class
+hub with two managed clusters.
 
 ---
 
@@ -68,7 +73,7 @@ spec:
     metricObjectStorage:
       name: thanos-object-storage
       key: thanos.yaml
-  storageClassName: ocs-storagecluster-ceph-rbd
+    storageClass: ocs-storagecluster-ceph-rbd
 ```
 ```bash
 oc apply -f mco-instance.yaml
@@ -84,37 +89,12 @@ oc scale statefulset observability-thanos-store-memcached -n open-cluster-manage
 oc scale deployment observability-rbac-query-proxy -n open-cluster-management-observability --replicas=1
 ```
 
-**1.7 — Add custom metrics to the collection allowlist**
-
-RHACM Observability only federates a curated set of metrics from each managed cluster by default (e.g. `cluster_operator_conditions`, `up`, `kube_node_status_condition`). The Workloads panel in `acm-clusters-overview.yaml` needs two metrics that aren't on that default list — `kube_pod_status_ready` (per-namespace pod count baseline) and `kube_pod_container_status_waiting_reason` (detects `CrashLoopBackOff`). Without this, the Workloads panel shows "No Data", or worse, shows every namespace as healthy even when a pod is crash-looping.
-
-Save as [base/observability-metrics-custom-allowlist.yaml](base/observability-metrics-custom-allowlist.yaml) and apply on the hub:
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: observability-metrics-custom-allowlist
-  namespace: open-cluster-management-observability
-data:
-  metrics_list.yaml: |
-    names:
-      - kube_pod_status_ready
-      - kube_pod_container_status_waiting_reason
-```
-```bash
-oc apply -f base/observability-metrics-custom-allowlist.yaml
-```
-
-Each managed cluster's `metrics-collector` pod (in `open-cluster-management-addon-observability`) restarts to pick up the new allowlist — this can take a few minutes. You can confirm it restarted recently with:
-```bash
-oc get pods -n open-cluster-management-addon-observability -l component=metrics-collector
-```
-
 ---
 
 ## Phase 2 — Install the Cluster Observability Operator (COO)
 
-This operator manages Perses and the `UIPlugin` that integrates it into the OpenShift Console.
+This operator manages Perses and renders dashboards in the OpenShift Console. MCOA's Perses
+integration (Phase 4) requires this already installed — it does not install COO itself.
 
 Save as [base/coo-operator-perses.yaml](base/coo-operator-perses.yaml) and apply:
 ```yaml
@@ -153,204 +133,113 @@ oc wait --for=condition=Ready pod -l name=cluster-observability-operator \
   -n openshift-cluster-observability-operator --timeout=120s
 ```
 
----
-
-## Phase 3 — Enable the Perses UI Plugin
-
-This `UIPlugin` tells COO to deploy the Perses instance and wire it into the OpenShift Console's Observe tab. It also enables the ACM multi-cluster alertmanager/Thanos integration in the UI.
-
-Save as [base/perses-ui.yaml](base/perses-ui.yaml) and apply:
-```yaml
-apiVersion: observability.openshift.io/v1alpha1
-kind: UIPlugin
-metadata:
-  name: monitoring
-spec:
-  type: Monitoring
-  monitoring:
-    perses:
-      enabled: true
-    acm:
-      enabled: true
-      thanosQuerier:
-        url: 'http://observability-thanos-query.open-cluster-management-observability.svc.cluster.local:9090'
-      alertmanager:
-        url: 'http://observability-alertmanager.open-cluster-management-observability.svc.cluster.local:9093'
-```
-```bash
-oc apply -f base/perses-ui.yaml
-```
-
-COO automatically creates:
-- The `Perses` CR in `openshift-cluster-observability-operator`
-- A default `accelerators-thanos-querier-datasource` PersesDatasource (local cluster Prometheus)
-- TLS secrets and the `perses` TLS service
+Note: this installs in `AllNamespaces` mode, so its `CSV` is mirrored (read-only) into every
+namespace on the cluster — that's normal OLM behavior, not something specific to this setup.
 
 ---
 
-## Phase 4 — Set Up the Fleet Datasource (RBAC + Secret + PersesDatasource)
+## Phase 3 — Enable the Multicluster Observability Add-on (MCOA)
 
-This is the critical piece: it creates a service account with a long-lived token that Perses uses to authenticate against RHACM's Thanos `rbac-query-proxy` to get cross-cluster metrics.
-
-Save as [base/perses-fleet-datasource.yaml](base/perses-fleet-datasource.yaml) and apply:
-
-```yaml
-# 1. ServiceAccount that will authenticate against Thanos
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: dynamic-fleet-thanos-sa
-  namespace: openshift-cluster-observability-operator
----
-# 2. Long-lived SA token secret (OpenShift populates the token automatically)
-apiVersion: v1
-kind: Secret
-metadata:
-  name: dynamic-fleet-thanos-secret
-  namespace: openshift-cluster-observability-operator
-  annotations:
-    kubernetes.io/service-account.name: dynamic-fleet-thanos-sa
-type: kubernetes.io/service-account-token
----
-# 3. Give the SA permission to query cluster monitoring (needed to reach Thanos)
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: dynamic-fleet-thanos-sa-reader
-subjects:
-  - kind: ServiceAccount
-    name: dynamic-fleet-thanos-sa
-    namespace: openshift-cluster-observability-operator
-roleRef:
-  kind: ClusterRole
-  name: cluster-monitoring-view
-  apiGroup: rbac.authorization.k8s.io
----
-# 4. PersesDatasource — the fleet-wide Thanos endpoint (with mTLS via internal CA)
-apiVersion: perses.dev/v1alpha2
-kind: PersesDatasource
-metadata:
-  name: dynamic-fleet-thanos-datasource
-  namespace: openshift-cluster-observability-operator
-spec:
-  client:
-    tls:
-      enable: true
-      caCert:
-        type: file
-        certPath: /ca/service-ca.crt
-  config:
-    default: false
-    display:
-      name: "ACM MultiCluster Thanos Engine"
-    plugin:
-      kind: PrometheusDatasource
-      spec:
-        proxy:
-          kind: HTTPProxy
-          spec:
-            secret: dynamic-fleet-thanos-secret
-            url: 'https://observability-thanos-query-frontend.open-cluster-management-observability.svc.cluster.local:9092'
-```
-```bash
-oc apply -f base/perses-fleet-datasource.yaml
-```
-
-> **Note:** The Perses operator reconciles the datasource and may rewrite the proxy secret name and URL internally (it creates a copy named `dynamic-fleet-thanos-datasource-secret` and may route through `rbac-query-proxy:8443`). This is expected.
-
----
-
-## Phase 5 — Grant Perses Permission to Read the Token Secret
-
-By default, the `perses-sa` ServiceAccount cannot read secrets in the namespace. This Role+RoleBinding unlocks that so Perses can read `dynamic-fleet-thanos-secret` to pass the OAuth bearer token upstream to Thanos.
+Enabling `capabilities.platform.metrics` on the `MultiClusterObservability` CR from Phase 1 causes
+the operator to **stop deploying the classic `metrics-collector`** to every managed cluster and
+instead deploy `multicluster-observability-addon-manager`, which rolls out `PrometheusAgent`-based
+collectors instead (`prom-agent-platform-metrics-collector-0` /
+`prom-agent-user-workload-metrics-collector-0`, in each managed cluster's
+`open-cluster-management-agent-addon` namespace — or directly in
+`open-cluster-management-observability` for the hub monitoring itself as `local-cluster`).
 
 ```bash
-oc apply -f - <<'EOF'
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: perses-secret-reader
-  namespace: openshift-cluster-observability-operator
-rules:
-- apiGroups: [""]
-  resources: ["secrets"]
-  verbs: ["get", "list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: perses-secret-reader
-  namespace: openshift-cluster-observability-operator
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: perses-secret-reader
-subjects:
-- kind: ServiceAccount
-  name: perses-sa
-  namespace: openshift-cluster-observability-operator
-EOF
+oc patch mco observability -n open-cluster-management-observability --type=merge -p \
+  '{"spec":{"capabilities":{"platform":{"metrics":{"default":{"enabled":true}}},"userWorkloads":{"metrics":{"default":{"enabled":true}}}}}}'
+```
+
+Verify the cutover (allow a minute or two):
+```bash
+oc get cma multicluster-observability-addon
+oc get prometheusagents -n open-cluster-management-observability
+oc get pods -n open-cluster-management-agent-addon | grep prom-agent
 ```
 
 ---
 
-## Phase 6 — Grant Perses Permission to Read Observability CRDs
-
-This ClusterRole+ClusterRoleBinding lets Perses list `PersesDatasources`, `ManagedClusters`, and `MultiClusterObservabilities` — needed for the ACM multi-cluster integration to work in the UI.
+## Phase 4 — Enable Perses Dashboards via MCOA
 
 ```bash
-oc apply -f - <<'EOF'
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: perses-custom-observability-reader
-rules:
-- apiGroups: ["perses.dev"]
-  resources: ["persesglobaldatasources", "persesdatasources"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: ["cluster.open-cluster-management.io"]
-  resources: ["managedclusters"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: ["observability.open-cluster-management.io"]
-  resources: ["multiclusterobservabilities", "endpoints"]
-  verbs: ["get", "list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: perses-custom-observability-binding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: perses-custom-observability-reader
-subjects:
-- kind: ServiceAccount
-  name: perses
-  namespace: openshift-cluster-observability-operator
-- kind: ServiceAccount
-  name: perses-sa
-  namespace: openshift-cluster-observability-operator
-- kind: Group
-  apiGroup: rbac.authorization.k8s.io
-  name: system:authenticated
-EOF
+oc patch mco observability -n open-cluster-management-observability --type=merge -p \
+  '{"spec":{"capabilities":{"platform":{"metrics":{"default":{"enabled":true},"ui":{"enabled":true}}}}}}'
+```
+
+This alone causes the addon-manager to auto-create, with **no manual RBAC required**:
+- A `PersesDatasource` named `rbac-query-proxy-datasource` in `open-cluster-management-observability`
+  (project-scoped, plain HTTP on `rbac-query-proxy:8080` — no Secret, no ServiceAccount token;
+  `rbac-query-proxy` does its own per-request `SubjectAccessReview` using the caller's forwarded
+  identity instead of a static credential).
+- A `UIPlugin` named `monitoring` with `acm.enabled: true`, wired to
+  `alertmanager.open-cluster-management-observability.svc:9095` and
+  `rbac-query-proxy.open-cluster-management-observability.svc:8443`.
+- ~15 built-in Perses dashboards (including one literally named `acm-clusters-overview`) in
+  `open-cluster-management-observability`. These are separate from this repo's own dashboards
+  (different namespace, different content) — not a conflict, but check that project in the
+  console's Dashboards dropdown before assuming a custom dashboard is missing.
+
+Verify:
+```bash
+oc get persesdatasources -n open-cluster-management-observability
+oc get uiplugin monitoring -o yaml
+oc get persesdashboards -n open-cluster-management-observability
 ```
 
 ---
 
-## Phase 7 — Apply the Dashboards
+## Phase 5 — Apply the Fleet Datasource, Custom Metrics, and Dashboards
 
-The dashboard defines two `StatChart` panels — `cluster_operator_conditions` from the `dynamic-fleet-thanos-datasource`. It also has a `TextVariable` for the console base URL used in panel deep-links.
+`base/` covers the rest in one shot:
+
+- [base/dynamic-fleet-thanos-datasource.yaml](base/dynamic-fleet-thanos-datasource.yaml) —
+  a `PersesGlobalDatasource` pointed at the same `rbac-query-proxy:8080` endpoint MCOA uses
+  internally, kept **cluster-wide** (unlike MCOA's own project-scoped one) so this repo's
+  dashboards — which live in `openshift-cluster-observability-operator`, a different namespace —
+  can reference it.
+- [base/acm-clusters-overview-custom-metrics-scrapeconfig.yaml](base/acm-clusters-overview-custom-metrics-scrapeconfig.yaml) —
+  federates the two metrics the Workloads panel needs that aren't in any default `ScrapeConfig`:
+  `kube_pod_status_ready` and `kube_pod_container_status_waiting_reason`.
+- `perses-dashboards/` — the dashboards themselves (`acm-clusters-overview.yaml`,
+  `operator-overview.yaml`), referenced unchanged via `../perses-dashboards/`.
 
 ```bash
 oc apply -k base
 ```
 
+**This alone is not enough** — the `ScrapeConfig` above has to also be referenced in the
+`multicluster-observability-addon` `ClusterManagementAddOn`'s placement, or nothing federates it.
+That's an in-place append to a list of configs otherwise fully managed by the operator, which
+isn't safe to express as a static `kustomize` resource (a plain `apply` would fight the operator
+over the rest of the list). Append it with a JSON patch instead:
 
-Verify it is live:
+```bash
+oc patch cma multicluster-observability-addon --type=json -p \
+  '[{"op":"add","path":"/spec/installStrategy/placements/0/configs/-","value":{"group":"monitoring.rhobs","name":"acm-clusters-overview-custom-metrics","namespace":"open-cluster-management-observability","resource":"scrapeconfigs"}}]'
+```
+
+Verify the two custom metrics start flowing (allow up to 5 minutes — the default federate interval):
+```bash
+oc get cma multicluster-observability-addon -o yaml | yq '.spec.installStrategy.placements[0].configs'
+# once landed, from a thanos-query pod in open-cluster-management-observability:
+#   curl -sG http://localhost:9090/api/v1/query --data-urlencode 'query=count by (cluster) (kube_pod_status_ready)'
+```
+
+`kube_pod_container_status_waiting_reason` will only show data while something is actually
+`CrashLoopBackOff` (or another waiting-reason state) somewhere in the fleet — an empty result on
+its own isn't a failure, unlike `kube_pod_status_ready`, which should always have data as soon as
+any pod exists anywhere.
+
+Verify the dashboards are live:
 ```bash
 oc get persesdashboards -n openshift-cluster-observability-operator
 ```
+
+The dashboards are visible in the OpenShift Console under **Observe → Dashboards**, project
+`openshift-cluster-observability-operator`.
 
 ---
 
@@ -358,17 +247,31 @@ oc get persesdashboards -n openshift-cluster-observability-operator
 
 | Kind | Name | Namespace | Purpose |
 |------|------|-----------|---------|
+| `MultiClusterObservability` | `observability` | cluster-scoped | RHACM's fleet Thanos backend + MCOA capabilities |
 | `Subscription` | `cluster-observability-operator` | `openshift-cluster-observability-operator` | Installs COO from OLM |
-| `UIPlugin` | `monitoring` | cluster-scoped | Enables Perses in Console + ACM integration |
-| `Perses` | `perses` | `openshift-cluster-observability-operator` | Auto-created by COO from UIPlugin |
-| `ServiceAccount` | `dynamic-fleet-thanos-sa` | `openshift-cluster-observability-operator` | Identity for Thanos auth |
-| `Secret` | `dynamic-fleet-thanos-secret` | `openshift-cluster-observability-operator` | Long-lived SA token for Thanos OAuth |
-| `ClusterRoleBinding` | `dynamic-fleet-thanos-sa-reader` | cluster | Grants `cluster-monitoring-view` to the SA |
-| `PersesDatasource` | `dynamic-fleet-thanos-datasource` | `openshift-cluster-observability-operator` | Fleet Thanos endpoint for dashboards |
-| `Role` | `perses-secret-reader` | `openshift-cluster-observability-operator` | Lets Perses SA read secrets |
-| `RoleBinding` | `perses-secret-reader` | `openshift-cluster-observability-operator` | Binds secret-reader role to `perses-sa` |
-| `ClusterRole` | `perses-custom-observability-reader` | cluster | Lets Perses read MCO/ACM CRDs |
-| `ClusterRoleBinding` | `perses-custom-observability-binding` | cluster | Binds above to Perses SAs + authenticated users |
-| `PersesDashboard` | `openshift-cluster-observability-operator` | The dashboard itself |
+| `PersesGlobalDatasource` | `dynamic-fleet-thanos-datasource` | cluster-scoped | Fleet Thanos endpoint for this repo's dashboards, no credential needed |
+| `ScrapeConfig` | `acm-clusters-overview-custom-metrics` | `open-cluster-management-observability` | Federates the two custom metrics the Workloads panel needs |
+| `PersesDashboard` | `acm-clusters-overview`, `my-new-perses-dashboard` | `openshift-cluster-observability-operator` | The dashboards themselves |
 
-The dashboards are visible in the OpenShift Console under **RHACM -> Observe -> Dashboards** once all resources are in place.
+Auto-created by MCOA once Phases 3–4 are enabled (not authored in this repo):
+
+| Kind | Name | Namespace | Purpose |
+|------|------|-----------|---------|
+| `ClusterManagementAddOn` | `multicluster-observability-addon` | cluster-scoped | Manages the PrometheusAgent-based collectors per managed cluster |
+| `PrometheusAgent` | `mcoa-default-platform-metrics-collector-global`, `mcoa-default-user-workload-metrics-collector-global` | `open-cluster-management-observability` | Replaces the classic `metrics-collector` |
+| `PersesDatasource` | `rbac-query-proxy-datasource` | `open-cluster-management-observability` | MCOA's own project-scoped fleet datasource |
+| `UIPlugin` | `monitoring` | cluster-scoped | Enables Perses + ACM alerting in the Console |
+
+---
+
+## Known Gap
+
+Nothing in MCOA's auto-created RBAC grants read on `managedclusters`
+(`cluster.open-cluster-management.io`) or `multiclusterobservabilities`
+(`observability.open-cluster-management.io`) to the Perses service account — only `namespaces` and
+Perses's own CRDs (`persesdashboards`, `persesdatasources`, `persesglobaldatasources`). This hasn't
+caused a failure in testing (the dashboards in this repo don't need it — their cluster picker uses
+a `PrometheusLabelValuesVariable`, not the Kubernetes API), but if the console's ACM alerting
+perspective misbehaves, this is the first thing to check. There is no official Red Hat
+documentation for a fix — confirmed by full-text search of the RHACM 2.17 Observability guide (90
+pages, no mention of either resource beyond the `MultiClusterObservability` CR itself).
