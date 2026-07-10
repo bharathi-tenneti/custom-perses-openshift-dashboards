@@ -1,4 +1,4 @@
-# Tutorial: Setting Up `my-new-perses-dashboard` on OpenShift
+# Tutorial: Setting Up Multi cluster Perses Dashboards on OpenShift via RHACM and Cluster Observability Operator(COO)
 
 This dashboard shows fleet-wide cluster health across `local-cluster` and every managed cluster,
 using RHACM's multicluster observability add-on (MCOA) as the metrics backend, rendered in Perses
@@ -13,12 +13,12 @@ hub with two managed clusters.
 
 This sets up the federated Thanos backend that collects metrics from all managed clusters.
 
-**1.1 — Create the observability namespace**
+**1.1  Create the observability namespace**
 ```bash
 oc create namespace open-cluster-management-observability
 ```
 
-**1.2 — Create the S3 object storage bucket**
+**1.2  Create the S3 object storage bucket**
 
 Save as `obc.yaml` and apply:
 ```yaml
@@ -35,7 +35,7 @@ spec:
 oc apply -f obc.yaml
 ```
 
-**1.3 — Create the `thanos-object-storage` secret** (populates S3 credentials from the OBC):
+**1.3  Create the `thanos-object-storage` secret** (populates S3 credentials from the OBC):
 ```bash
 oc patch secret thanos-object-storage -n open-cluster-management-observability --type=merge \
   -p "{\"stringData\":{\"thanos.yaml\":\"type: S3\nconfig:\n  bucket: $(oc get configmap acm-thanos-bucket -n open-cluster-management-observability -o jsonpath='{.data.BUCKET_NAME}')\n  endpoint: s3.openshift-storage.svc.cluster.local\n  insecure: true\n  access_key: $(oc get secret acm-thanos-bucket -n open-cluster-management-observability -o jsonpath='{.data.AWS_ACCESS_KEY_ID}' | base64 -d)\n  secret_key: $(oc get secret acm-thanos-bucket -n open-cluster-management-observability -o jsonpath='{.data.AWS_SECRET_ACCESS_KEY}' | base64 -d)\n\"}}" \
@@ -50,7 +50,7 @@ config:
   secret_key: $(oc get secret acm-thanos-bucket -n open-cluster-management-observability -o jsonpath='{.data.AWS_SECRET_ACCESS_KEY}' | base64 -d)"
 ```
 
-**1.4 — Copy the global pull secret** (so MCO can pull Thanos/Grafana images):
+**1.4  Copy the global pull secret** (so MCO can pull Thanos/Grafana images):
 ```bash
 oc get secret pull-secret -n openshift-config -o json \
   | sed 's/"namespace": "openshift-config"/"namespace": "open-cluster-management-observability"/g' \
@@ -58,7 +58,7 @@ oc get secret pull-secret -n openshift-config -o json \
   | oc apply -f -
 ```
 
-**1.5 — Apply the MCO instance** (save as `mco-instance.yaml`):
+**1.5  Apply the MCO instance** (save as `mco-instance.yaml`):
 ```yaml
 apiVersion: observability.open-cluster-management.io/v1beta2
 kind: MultiClusterObservability
@@ -79,7 +79,7 @@ spec:
 oc apply -f mco-instance.yaml
 ```
 
-**1.6 — Force-scale for SNO** (single-node cluster — skip if multi-node):
+**1.6 Force-scale for SNO** (SNO cluster — skip if multi-node):
 ```bash
 oc scale statefulset observability-thanos-receive-default -n open-cluster-management-observability --replicas=1
 oc scale statefulset observability-alertmanager -n open-cluster-management-observability --replicas=1
@@ -109,7 +109,7 @@ metadata:
   name: cluster-observability-operator-group
   namespace: openshift-cluster-observability-operator
 spec:
-  targetNamespaces: []   # AllNamespaces mode
+  targetNamespaces: []   
 ---
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
@@ -133,10 +133,6 @@ oc wait --for=condition=Ready pod -l name=cluster-observability-operator \
   -n openshift-cluster-observability-operator --timeout=120s
 ```
 
-Note: this installs in `AllNamespaces` mode, so its `CSV` is mirrored (read-only) into every
-namespace on the cluster — that's normal OLM behavior, not something specific to this setup.
-
----
 
 ## Phase 3 — Enable the Multicluster Observability Add-on (MCOA)
 
@@ -168,19 +164,6 @@ oc get pods -n open-cluster-management-agent-addon | grep prom-agent
 oc patch mco observability -n open-cluster-management-observability --type=merge -p \
   '{"spec":{"capabilities":{"platform":{"metrics":{"default":{"enabled":true},"ui":{"enabled":true}}}}}}'
 ```
-
-This alone causes the addon-manager to auto-create, with **no manual RBAC required**:
-- A `PersesDatasource` named `rbac-query-proxy-datasource` in `open-cluster-management-observability`
-  (project-scoped, plain HTTP on `rbac-query-proxy:8080` — no Secret, no ServiceAccount token;
-  `rbac-query-proxy` does its own per-request `SubjectAccessReview` using the caller's forwarded
-  identity instead of a static credential).
-- A `UIPlugin` named `monitoring` with `acm.enabled: true`, wired to
-  `alertmanager.open-cluster-management-observability.svc:9095` and
-  `rbac-query-proxy.open-cluster-management-observability.svc:8443`.
-- ~15 built-in Perses dashboards (including one literally named `acm-clusters-overview`) in
-  `open-cluster-management-observability`. These are separate from this repo's own dashboards
-  (different namespace, different content) — not a conflict, but check that project in the
-  console's Dashboards dropdown before assuming a custom dashboard is missing.
 
 Verify:
 ```bash
@@ -238,7 +221,7 @@ Verify the dashboards are live:
 oc get persesdashboards -n openshift-cluster-observability-operator
 ```
 
-The dashboards are visible in the OpenShift Console under **Observe → Dashboards**, project
+The dashboards are visible in the OpenShift Console under **Fleet Managementt -> Observe → Dashboards**, project
 `openshift-cluster-observability-operator`.
 
 ---

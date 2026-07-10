@@ -54,10 +54,6 @@ spec:
                 - 'console_url{cluster="$cluster"}'
 
     panels:
-      # Table instead of one tile per operator: a typical OpenShift cluster
-      # has 30+ ClusterOperators, which turns a StatChart tile grid into an
-      # unscrollable wall (same reasoning as the Nodes/Workloads/Alerts
-      # panels in acm-clusters-overview.yaml).
       "operator_matrix_panel":
         kind: Panel
         spec:
@@ -110,12 +106,6 @@ spec:
                         (cluster_operator_conditions{cluster=~"$cluster", condition="Progressing"} == 1) * 2 or
                         (cluster_operator_conditions{cluster=~"$cluster", condition="Available"} == 1) * 1
                       )
-          # Panel-level link to the cluster operators list page. Table panels
-          # support a per-column dataLink field, which could point each row
-          # at its own operator's console page — not done here since it
-          # needs verifying whether dataLink can reference the row's own
-          # cell value (e.g. the operator name) rather than only dashboard
-          # variables like $console/$cluster.
           links:
             - name: "Cluster Operators"
               url: "${console}/settings/cluster/clusteroperators"

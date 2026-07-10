@@ -1,0 +1,50 @@
+# Federates metrics this repo's dashboards need that aren't reliably in the
+# multicluster observability add-on's default ScrapeConfigs (platform-metrics,
+# platform-metrics-alerts, platform-metrics-hcp, platform-metrics-kubevirt,
+# platform-metrics-right-sizing):
+#   - kube_pod_status_ready: per-namespace pod count baseline (Workloads panel)
+#   - kube_pod_container_status_waiting_reason: CrashLoopBackOff detection
+#   - cluster_operator_conditions: backs the $cluster dashboard variable and
+#     the Core Platform / ClusterOperators checks
+#   - kube_node_status_condition: backs the Nodes panel (Ready + Pressure)
+#   - cluster:master_nodes, cluster:infra_nodes: node-role counts (fleet table)
+#   - kube_node_spec_unschedulable: schedulable-node ratio (fleet table)
+#   - kube_pod_status_phase: per-namespace pod health used by the fleet table's
+#     Ingress/Console/OAuth/DNS/GitOps/Pipelines/etc. columns
+#
+# All of these are normally in the default platform-metrics ScrapeConfig, but
+# were each observed to silently drop out of it after a COO operator upgrade
+# (v1.5.0 -> v1.5.1) mid-deployment — since every panel query filters on
+# cluster="$cluster", losing just cluster_operator_conditions alone cascades
+# into every panel and the cluster dropdown itself going empty. Pinning all of
+# them here in our own ScrapeConfig means they survive regardless of what the
+# default list contains. (cluster:infra_nodes and argocd_app_info are genuinely
+# absent on some clusters rather than a federation gap — e.g. a cluster with no
+# infra-role nodes, or no ArgoCD installed — which the fleet table's N/A
+# fallback already handles; including them here is harmless either way.)
+#
+# Applying this alone is not enough — it must also be referenced in the
+# multicluster-observability-addon ClusterManagementAddOn's placement, which
+# is an in-place append to a list otherwise fully managed by the operator, not
+# safe to express as a static kustomize resource. See SETUP.md Phase 5.
+apiVersion: monitoring.rhobs/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: acm-clusters-overview-custom-metrics
+  namespace: open-cluster-management-observability
+  labels:
+    app.kubernetes.io/component: platform-metrics-collector
+spec:
+  jobName: acm-clusters-overview-custom
+  metricsPath: /federate
+  params:
+    match[]:
+      - '{__name__="kube_pod_status_ready"}'
+      - '{__name__="kube_pod_container_status_waiting_reason"}'
+      - '{__name__="cluster_operator_conditions"}'
+      - '{__name__="kube_node_status_condition"}'
+      - '{__name__="cluster:master_nodes"}'
+      - '{__name__="cluster:infra_nodes"}'
+      - '{__name__="kube_node_spec_unschedulable"}'
+      - '{__name__="kube_pod_status_phase"}'
+      - '{__name__="argocd_app_info"}'

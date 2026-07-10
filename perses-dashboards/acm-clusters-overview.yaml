@@ -136,12 +136,7 @@ spec:
 
       # ------------------------------------------------------------------
       # Nodes — one row per node, discovered dynamically.
-      # Table instead of per-node tiles: node count is unbounded, so a
-      # StatChart tile grid turns into an unscrollable wall on a large
-      # cluster. Ready and Pressure are pre-joined into a single PromQL
-      # query via group_left/count_values (same technique MCOA's own
-      # built-in dashboards use, e.g. "etcd Health" in acm-clusters-overview)
-      # rather than relying on Perses to join two separate queries by label.
+      # 1 = ready, 0 = not ready. Pressure column = 1 if no pressure, 0 if
       # ------------------------------------------------------------------
       nodes:
         kind: Panel
@@ -204,10 +199,6 @@ spec:
       # ------------------------------------------------------------------
       # Workloads — one row per namespace, discovered dynamically.
       # 1 = all pods in that namespace healthy, <1 = some crash-looping.
-      # Table instead of per-namespace tiles: namespace count is unbounded.
-      # Range cellSettings replicate the same red/yellow/green thresholds
-      # the previous StatChart tiles used, since this ratio is fractional
-      # (e.g. 0.8 = one pod degraded out of five), not just discrete 0/1.
       # ------------------------------------------------------------------
       workloads:
         kind: Panel
@@ -251,10 +242,6 @@ spec:
 
       # ------------------------------------------------------------------
       # Alerts — one row per firing critical alert. No rows = all clear.
-      # Table instead of per-alert tiles: firing-alert count is unbounded.
-      # Every row here is by definition a firing critical alert, so the
-      # whole row is styled red via a Regex ".*" match rather than needing
-      # a 0/1 health value like the other panels.
       # ------------------------------------------------------------------
       critical_alerts:
         kind: Panel

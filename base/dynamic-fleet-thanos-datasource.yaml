@@ -1,0 +1,25 @@
+# Reaches RHACM's fleet-wide Thanos through rbac-query-proxy's plain-HTTP
+# internal port (8080). This is a PersesGlobalDatasource
+# dashboards across namespaces can use.
+apiVersion: perses.dev/v1alpha2
+kind: PersesGlobalDatasource
+metadata:
+  name: dynamic-fleet-thanos-datasource
+spec:
+  client:
+    tls:
+      enable: true
+      caCert:
+        type: file
+        certPath: /ca/service-ca.crt
+  config:
+    default: false
+    display:
+      name: "ACM MultiCluster Thanos Engine"
+    plugin:
+      kind: PrometheusDatasource
+      spec:
+        proxy:
+          kind: HTTPProxy
+          spec:
+            url: 'http://rbac-query-proxy.open-cluster-management-observability.svc.cluster.local:8080'
