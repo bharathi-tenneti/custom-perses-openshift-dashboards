@@ -135,38 +135,40 @@ spec:
               targetBlank: true
 
       # ------------------------------------------------------------------
-      # Nodes — one tile per node
-      # Shows Node Ready and Schedulable status broken down per node so you
-      # can immediately see which node is unhealthy.
+      # Nodes — one row per node, discovered dynamically.
+      # 1 = ready, 0 = not ready. Pressure column = 1 if no pressure, 0 if
       # ------------------------------------------------------------------
-      node_ready:
+      nodes:
         kind: Panel
         spec:
           display:
-            name: "Node Ready — $cluster"
+            name: "Nodes — $cluster"
           plugin:
-            kind: StatChart
+            kind: Table
             spec:
-              calculation: last
-              colorMode: background_solid
-              format:
-                unit: decimal
-              metricLabel: node
-              sparkline: {}
-              valueFontSize: 10
-              mappings:
-                - kind: Value
-                  spec:
-                    value: "0"
-                    result: { color: "#f2495c", value: "Not Ready" }
-                - kind: Value
-                  spec:
-                    value: "1"
-                    result: { color: "#73bf69", value: "Ready" }
-              thresholds:
-                steps:
-                  - { color: "#f2495c", value: 0 }
-                  - { color: "#73bf69", value: 1 }
+              columnSettings:
+                - name: node
+                  header: Node
+                - name: value
+                  header: Ready
+                  cellSettings:
+                    - condition: { kind: Value, spec: { value: "0" } }
+                      text: "Not Ready"
+                      backgroundColor: "#f2495c"
+                    - condition: { kind: Value, spec: { value: "1" } }
+                      text: "Ready"
+                      backgroundColor: "#73bf69"
+                - name: pressure
+                  header: Pressure
+                  cellSettings:
+                    - condition: { kind: Value, spec: { value: "0" } }
+                      text: "Under Pressure"
+                      backgroundColor: "#f2495c"
+                    - condition: { kind: Value, spec: { value: "1" } }
+                      text: "OK"
+                      backgroundColor: "#73bf69"
+                - name: timestamp
+                  hide: true
           queries:
             - kind: TimeSeriesQuery
               spec:
@@ -174,8 +176,20 @@ spec:
                   kind: PrometheusTimeSeriesQuery
                   spec:
                     datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
-                    seriesNameFormat: "{{ node }}"
-                    query: 'kube_node_status_condition{condition="Ready", status="true", cluster="$cluster"}'
+                    # max by (node): strips every other label (job, instance,
+                    # etc.) down to just "node", so the table shows one clean
+                    # column per node instead of every scrape label.
+                    # group_left(pressure) + count_values smuggles the second
+                    # query's per-node value in as a "pressure" label on the
+                    # same series — min() across all 3 pressure types gives
+                    # worst case per node (0 = pressure active, 1 = OK).
+                    query: |-
+                      max by (node) (kube_node_status_condition{condition="Ready", status="true", cluster="$cluster"})
+                      * on (node) group_left (pressure)
+                        count_values without () (
+                          "pressure",
+                          min by (node) (1 - kube_node_status_condition{condition=~"DiskPressure|MemoryPressure|PIDPressure", status="true", cluster="$cluster"})
+                        )
           links:
             - name: "Nodes"
               url: "${console}/k8s/cluster/nodes"
@@ -183,59 +197,7 @@ spec:
               targetBlank: true
 
       # ------------------------------------------------------------------
-      # Node Pressure — one tile per node
-      # Green = no pressure on any condition.
-      # Red = DiskPressure, MemoryPressure, or PIDPressure is active.
-      # min() across all 3 pressure types: if any fires the node goes red.
-      # ------------------------------------------------------------------
-      node_pressure:
-        kind: Panel
-        spec:
-          display:
-            name: "Node Pressure — $cluster"
-          plugin:
-            kind: StatChart
-            spec:
-              calculation: last
-              colorMode: background_solid
-              format:
-                unit: decimal
-              metricLabel: node
-              sparkline: {}
-              valueFontSize: 10
-              mappings:
-                - kind: Value
-                  spec:
-                    value: "0"
-                    result: { color: "#f2495c", value: "Under Pressure" }
-                - kind: Value
-                  spec:
-                    value: "1"
-                    result: { color: "#73bf69", value: "OK" }
-              thresholds:
-                steps:
-                  - { color: "#f2495c", value: 0 }
-                  - { color: "#73bf69", value: 1 }
-          queries:
-            - kind: TimeSeriesQuery
-              spec:
-                plugin:
-                  kind: PrometheusTimeSeriesQuery
-                  spec:
-                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
-                    seriesNameFormat: "{{ node }}"
-                    # 1 - pressure_value: converts 0 (no pressure) → 1 (OK),
-                    # 1 (pressure active) → 0 (red). min() across all 3
-                    # pressure types gives worst case per node.
-                    query: 'min by (node) (1 - kube_node_status_condition{condition=~"DiskPressure|MemoryPressure|PIDPressure", status="true", cluster="$cluster"})'
-          links:
-            - name: "Nodes"
-              url: "${console}/k8s/cluster/nodes"
-              renderVariables: true
-              targetBlank: true
-
-      # ------------------------------------------------------------------
-      # Workloads — one tile per namespace, discovered dynamically.
+      # Workloads — one row per namespace, discovered dynamically.
       # 1 = all pods in that namespace healthy, <1 = some crash-looping.
       # ------------------------------------------------------------------
       workloads:
@@ -244,29 +206,26 @@ spec:
           display:
             name: "Workloads — $cluster"
           plugin:
-            kind: StatChart
+            kind: Table
             spec:
-              calculation: last
-              colorMode: background_solid
-              format:
-                unit: decimal
-              metricLabel: namespace
-              sparkline: {}
-              valueFontSize: 10
-              mappings:
-                - kind: Value
-                  spec:
-                    value: "0"
-                    result: { color: "#f2495c", value: "Degraded" }
-                - kind: Value
-                  spec:
-                    value: "1"
-                    result: { color: "#73bf69", value: "OK" }
-              thresholds:
-                steps:
-                  - { color: "#f2495c", value: 0 }
-                  - { color: "#fade2a", value: 0.5 }
-                  - { color: "#73bf69", value: 0.999 }
+              columnSettings:
+                - name: namespace
+                  header: Namespace
+                - name: value
+                  header: Health
+                  format: { unit: decimal, decimalPlaces: 2 }
+                  cellSettings:
+                    - condition: { kind: Range, spec: { min: 0, max: 0.499 } }
+                      text: "Degraded"
+                      backgroundColor: "#f2495c"
+                    - condition: { kind: Range, spec: { min: 0.5, max: 0.998 } }
+                      text: "Partial"
+                      backgroundColor: "#fade2a"
+                    - condition: { kind: Range, spec: { min: 0.999, max: 1 } }
+                      text: "OK"
+                      backgroundColor: "#73bf69"
+                - name: timestamp
+                  hide: true
           queries:
             - kind: TimeSeriesQuery
               spec:
@@ -274,7 +233,6 @@ spec:
                   kind: PrometheusTimeSeriesQuery
                   spec:
                     datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
-                    seriesNameFormat: "{{ namespace }}"
                     query: '1 - ((count by (namespace) (max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff", cluster="$cluster"}[15m]) == 1) or (count by (namespace) (kube_pod_status_ready{condition="true", cluster="$cluster"}) * 0)) / count by (namespace) (kube_pod_status_ready{condition="true", cluster="$cluster"}))'
           links:
             - name: "Workloads"
@@ -283,8 +241,7 @@ spec:
               targetBlank: true
 
       # ------------------------------------------------------------------
-      # Alerts — firing critical alerts broken down by alertname
-      # Each tile = one firing critical alert. No tiles = all clear.
+      # Alerts — one row per firing critical alert. No rows = all clear.
       # ------------------------------------------------------------------
       critical_alerts:
         kind: Panel
@@ -292,19 +249,18 @@ spec:
           display:
             name: "Critical Alerts — $cluster"
           plugin:
-            kind: StatChart
+            kind: Table
             spec:
-              calculation: last
-              colorMode: background_solid
-              format:
-                unit: decimal
-              metricLabel: alertname
-              sparkline: {}
-              valueFontSize: 10
-              thresholds:
-                steps:
-                  - { color: "#f2495c", value: 0 }
-                  - { color: "#73bf69", value: 1 }
+              columnSettings:
+                - name: alertname
+                  header: Alert
+                  cellSettings:
+                    - condition: { kind: Regex, spec: { expr: ".*" } }
+                      backgroundColor: "#f2495c"
+                - name: value
+                  hide: true
+                - name: timestamp
+                  hide: true
           queries:
             - kind: TimeSeriesQuery
               spec:
@@ -312,8 +268,10 @@ spec:
                   kind: PrometheusTimeSeriesQuery
                   spec:
                     datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
-                    seriesNameFormat: "{{ alertname }}"
-                    query: 'ALERTS{alertstate="firing", severity="critical", cluster="$cluster"}'
+                    # count by (alertname): strips every other label down to
+                    # just "alertname", same reasoning as the Nodes/Workloads
+                    # panels above.
+                    query: 'count by (alertname) (ALERTS{alertstate="firing", severity="critical", cluster="$cluster"})'
           links:
             - name: "Alerting"
               url: "${console}/monitoring/alerts"
@@ -339,16 +297,10 @@ spec:
           items:
             - x: 0
               "y": 0
-              width: 12
-              height: 6
+              width: 24
+              height: 8
               content:
-                $ref: "#/spec/panels/node_ready"
-            - x: 12
-              "y": 0
-              width: 12
-              height: 6
-              content:
-                $ref: "#/spec/panels/node_pressure"
+                $ref: "#/spec/panels/nodes"
       - kind: Grid
         spec:
           display:
@@ -357,12 +309,12 @@ spec:
             - x: 0
               "y": 0
               width: 18
-              height: 6
+              height: 8
               content:
                 $ref: "#/spec/panels/workloads"
             - x: 18
               "y": 0
               width: 6
-              height: 6
+              height: 8
               content:
                 $ref: "#/spec/panels/critical_alerts"

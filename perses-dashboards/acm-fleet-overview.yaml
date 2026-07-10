@@ -1,0 +1,199 @@
+apiVersion: perses.dev/v1alpha2
+kind: PersesDashboard
+metadata:
+  name: acm-fleet-overview
+  namespace: openshift-cluster-observability-operator
+spec:
+  config:
+    display:
+      name: "ACM - All Clusters Overview"
+      description: >-
+        Migration of the original Grafana "Cluster Overview" panel
+        (original-grafana-dashboards/custom-overview.yaml) — one row per
+        managed cluster, not a single-cluster drill-down like
+        acm-clusters-overview.yaml.
+    duration: 5m
+    panels:
+      fleet_overview:
+        kind: Panel
+        spec:
+          display:
+            name: "Cluster Overview"
+          plugin:
+            kind: Table
+            spec:
+              columnSettings:
+                - name: cluster
+                  header: Cluster
+                - name: openshiftVersion
+                  header: OpenShift Version
+                - name: value
+                  header: API Server
+                  cellSettings: &ratioCellSettings
+                    - condition: { kind: Value, spec: { value: "-1" } }
+                      text: "N/A"
+                      backgroundColor: "#8e8e8e"
+                    - condition: { kind: Range, spec: { min: 0, max: 0.999 } }
+                      text: "Degraded"
+                      backgroundColor: "#f2495c"
+                    - condition: { kind: Range, spec: { min: 0.999, max: 1 } }
+                      text: "OK"
+                      backgroundColor: "#73bf69"
+                - name: master_nodes
+                  header: Master Nodes
+                  cellSettings:
+                    - condition: { kind: Value, spec: { value: "-1" } }
+                      text: "N/A"
+                      backgroundColor: "#8e8e8e"
+                - name: infra_nodes
+                  header: Infra Nodes
+                  cellSettings:
+                    - condition: { kind: Value, spec: { value: "-1" } }
+                      text: "N/A"
+                      backgroundColor: "#8e8e8e"
+                - name: schedulable
+                  header: Node Schedulable
+                  cellSettings: *ratioCellSettings
+                - name: node_ready
+                  header: Node Ready
+                  cellSettings: *ratioCellSettings
+                - name: node_pressure
+                  header: Node Pressure
+                  cellSettings: *ratioCellSettings
+                - name: kube_controller
+                  header: Kube Controller
+                  cellSettings: *ratioCellSettings
+                - name: kube_scheduler
+                  header: Kube Scheduler
+                  cellSettings: *ratioCellSettings
+                - name: etcd
+                  header: ETCD
+                  cellSettings: *ratioCellSettings
+                - name: ingress
+                  header: Ingress Pods
+                  cellSettings: *ratioCellSettings
+                - name: console
+                  header: Console
+                  cellSettings: *ratioCellSettings
+                - name: oauth
+                  header: OAuth
+                  cellSettings: *ratioCellSettings
+                - name: dns
+                  header: DNS
+                  cellSettings: *ratioCellSettings
+                - name: cluster_operators
+                  header: ClusterOperators
+                  cellSettings: *ratioCellSettings
+                - name: sscsi_aws
+                  header: Secrets Store CSI (AWS)
+                  cellSettings: *ratioCellSettings
+                - name: gitops_dev
+                  header: developer-gitops
+                  cellSettings: *ratioCellSettings
+                - name: gitops
+                  header: openshift-gitops
+                  cellSettings: *ratioCellSettings
+                - name: pipelines
+                  header: OpenShift Pipelines
+                  cellSettings: *ratioCellSettings
+                - name: dynatrace
+                  header: Dynatrace
+                  cellSettings: *ratioCellSettings
+                - name: csi_drivers
+                  header: EBS/EFS CSI Drivers
+                  cellSettings: *ratioCellSettings
+                - name: sumologic
+                  header: Sumologic
+                  cellSettings: *ratioCellSettings
+                - name: argocd_autosync
+                  header: Argo AutoSync
+                  cellSettings:
+                    - condition: { kind: Value, spec: { value: "-1" } }
+                      text: "N/A"
+                      backgroundColor: "#8e8e8e"
+                - name: alerts_critical
+                  header: Critical Alerts
+                  cellSettings:
+                    - condition: { kind: Value, spec: { value: "-1" } }
+                      text: "N/A"
+                      backgroundColor: "#8e8e8e"
+                    - condition: { kind: Value, spec: { value: "0" } }
+                      text: "OK"
+                      backgroundColor: "#73bf69"
+                    - condition: { kind: Range, spec: { min: 1 } }
+                      text: "Triggered"
+                      backgroundColor: "#f2495c"
+                - name: timestamp
+                  hide: true
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    query: |-
+                      sum(up{job="apiserver"} == 1) by (cluster) / count(up{job="apiserver"}) by (cluster)
+                      * on (cluster) group_left (master_nodes)
+                        count_values without () ("master_nodes", (count(cluster:master_nodes{}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (infra_nodes)
+                        count_values without () ("infra_nodes", (count(cluster:infra_nodes{}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (schedulable)
+                        count_values without () ("schedulable", (count(kube_node_spec_unschedulable{} == 0) by (cluster) / count(kube_node_spec_unschedulable{}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (node_ready)
+                        count_values without () ("node_ready", (sum(kube_node_status_condition{condition="Ready",status="true"} == 1) by (cluster) / count(kube_node_status_condition{condition="Ready",status="true"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (node_pressure)
+                        count_values without () ("node_pressure", (count(kube_node_status_condition{condition=~"DiskPressure|MemoryPressure|PIDPressure",status="true"} == 0) by (cluster) / count(kube_node_status_condition{condition=~"DiskPressure|MemoryPressure|PIDPressure",status="true"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (kube_controller)
+                        count_values without () ("kube_controller", (sum(up{job=~"controller-manager|kube-controller-manager"} == 1) by (cluster) / count(up{job=~"controller-manager|kube-controller-manager"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (kube_scheduler)
+                        count_values without () ("kube_scheduler", (sum(up{job="scheduler"} == 1) by (cluster) / count(up{job="scheduler"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (etcd)
+                        count_values without () ("etcd", (sum(up{job="etcd"} == 1) by (cluster) / count(up{job="etcd"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (ingress)
+                        count_values without () ("ingress", (count(kube_pod_status_phase{namespace="openshift-ingress",phase=~"Failed|Pending"} == 0) by (cluster) / count(kube_pod_status_phase{namespace="openshift-ingress",phase=~"Failed|Pending"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (console)
+                        count_values without () ("console", (count(kube_pod_status_phase{namespace="openshift-console",phase=~"Failed|Pending"} == 0) by (cluster) / count(kube_pod_status_phase{namespace="openshift-console",phase=~"Failed|Pending"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (oauth)
+                        count_values without () ("oauth", (count(kube_pod_status_phase{namespace="openshift-authentication",phase=~"Failed|Pending"} == 0) by (cluster) / count(kube_pod_status_phase{namespace="openshift-authentication",phase=~"Failed|Pending"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (dns)
+                        count_values without () ("dns", (count(kube_pod_status_phase{namespace="openshift-dns",phase=~"Failed|Pending"} == 0) by (cluster) / count(kube_pod_status_phase{namespace="openshift-dns",phase=~"Failed|Pending"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (cluster_operators)
+                        count_values without () ("cluster_operators", (count(cluster_operator_conditions{condition=~"Degraded|Progressing"} == 0) by (cluster) / count(cluster_operator_conditions{condition=~"Degraded|Progressing"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (sscsi_aws)
+                        count_values without () ("sscsi_aws", (count(kube_pod_status_phase{namespace="secrets-store-csi-driver-provider-aws", phase=~"Failed|Pending"} == 0) by (cluster) / count(kube_pod_status_phase{namespace="secrets-store-csi-driver-provider-aws", phase=~"Failed|Pending"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (gitops_dev)
+                        count_values without () ("gitops_dev", (count(kube_pod_status_phase{namespace="developer-gitops", phase=~"Failed|Pending"} == 0) by (cluster) / count(kube_pod_status_phase{namespace="developer-gitops", phase=~"Failed|Pending"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (gitops)
+                        count_values without () ("gitops", (count(kube_pod_status_phase{namespace="openshift-gitops", phase=~"Failed|Pending"} == 0) by (cluster) / count(kube_pod_status_phase{namespace="openshift-gitops", phase=~"Failed|Pending"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (pipelines)
+                        count_values without () ("pipelines", (count(kube_pod_status_phase{namespace="openshift-pipelines", phase=~"Failed|Pending"} == 0) by (cluster) / count(kube_pod_status_phase{namespace="openshift-pipelines", phase=~"Failed|Pending"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (dynatrace)
+                        count_values without () ("dynatrace", (count(kube_pod_status_phase{namespace="dynatrace", pod=~"(.*oneagent.*|dynatrace-.*)", phase=~"Failed|Pending|Terminating|CrashLoopBackOff|Unknown"} == 0) by (cluster) / count(kube_pod_status_phase{namespace="dynatrace", pod=~"(.*oneagent.*|dynatrace-.*)", phase=~"Failed|Pending|Terminating|CrashLoopBackOff|Unknown"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (csi_drivers)
+                        count_values without () ("csi_drivers", (count(kube_pod_status_phase{namespace="openshift-cluster-csi-drivers", pod=~"(aws-ebs-csi-driver.*|aws-efs-csi-driver-.*)", phase=~"Failed|Pending"} == 0) by (cluster) / count(kube_pod_status_phase{namespace="openshift-cluster-csi-drivers", pod=~"(aws-ebs-csi-driver.*|aws-efs-csi-driver-.*)", phase=~"Failed|Pending"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (sumologic)
+                        count_values without () ("sumologic", (count(kube_pod_status_phase{namespace="sumologic", pod=~"(.*-fluent-bit-.*|.*-sumologic-.*)", phase=~"Failed|Pending"} == 0) by (cluster) / count(kube_pod_status_phase{namespace="sumologic", pod=~"(.*-fluent-bit-.*|.*-sumologic-.*)", phase=~"Failed|Pending"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (argocd_autosync)
+                        count_values without () ("argocd_autosync", (count(argocd_app_info{name="cluster-config-manager", autosync_enabled="true"}) by (cluster)) or on (cluster) ((count by (cluster) (up{job="apiserver"}) * 0) - 1))
+                      * on (cluster) group_left (alerts_critical)
+                        count_values without () ("alerts_critical", (count(ALERTS{alertstate="firing",severity=~"critical"}) by (cluster)) or on (cluster) (count by (cluster) (up{job="apiserver"}) * 0))
+                      * on (cluster) group_left (openshiftVersion)
+                        (
+                          sum by (cluster, openshiftVersion) (sum without (name) (label_replace(sum without (cluster) (acm_managed_cluster_labels{}), "cluster", "$1", "name", "(.*)")))
+                          or on (cluster)
+                          label_replace(count by (cluster) (up{job="apiserver"}) * 0, "openshiftVersion", "unknown", "", "")
+                        )
+
+    layouts:
+      - kind: Grid
+        spec:
+          display:
+            title: Fleet Overview
+          items:
+            - x: 0
+              "y": 0
+              width: 24
+              height: 15
+              content:
+                $ref: "#/spec/panels/fleet_overview"
