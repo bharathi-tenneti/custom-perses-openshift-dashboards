@@ -48,3 +48,5 @@ spec:
       - '{__name__="kube_node_spec_unschedulable"}'
       - '{__name__="kube_pod_status_phase"}'
       - '{__name__="argocd_app_info"}'
+      - '{__name__="kube_pod_owner"}'
+      - '{__name__="container_cpu_usage_seconds_total"}'

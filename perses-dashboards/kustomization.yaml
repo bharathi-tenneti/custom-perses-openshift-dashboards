@@ -4,3 +4,4 @@ resources:
   - operator-overview.yaml
   - acm-clusters-overview.yaml
   - acm-fleet-overview.yaml
+  - cpu-mem-appnamespaces.yaml

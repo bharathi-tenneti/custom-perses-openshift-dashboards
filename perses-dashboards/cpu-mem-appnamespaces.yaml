@@ -1,0 +1,224 @@
+# Migrated from original-grafana-dashboards/cpu-mem-appnamespaces-dashboard.yaml
+# via `percli migrate --online`, and made fixes to make it Perses compatible.
+
+apiVersion: perses.dev/v1alpha2
+kind: PersesDashboard
+metadata:
+  name: cpu-mem-appnamespaces
+  namespace: openshift-cluster-observability-operator
+spec:
+  config:
+    display:
+      name: App Namespace - CPU and Memory Data
+    duration: 1h
+    variables:
+      - kind: ListVariable
+        spec:
+          display:
+            name: Cluster
+            hidden: false
+          defaultValue: arpt-deice-mg-d
+          allowAllValue: false
+          allowMultiple: false
+          sort: alphabetical-asc
+          plugin:
+            kind: PrometheusLabelValuesVariable
+            spec:
+              datasource:
+                kind: PrometheusDatasource
+                name: dynamic-fleet-thanos-datasource
+              labelName: name
+              matchers:
+                - acm_managed_cluster_labels{openshiftVersion_major!="3"}
+          name: cluster
+      - kind: TextVariable
+        spec:
+          display:
+            hidden: false
+          value: (cluster,namespace)
+          name: byvalue
+      - kind: TextVariable
+        spec:
+          display:
+            hidden: false
+          value: '"open.*|kub.*|wiz|twistlock|infra.*|.*test.*|cert-manager|cloudability|logging|developer-monitoring"'
+          name: appns
+
+    panels:
+      # ------------------------------------------------------------------
+      # Both panels below were rewritten from percli's raw 6-independent-
+      # queries-per-panel migration (Grafana's own multi-query table-join
+      # style) into a single pre-joined PromQL query per panel, using the
+      # same group_left/count_values technique as the Nodes/Workloads panels
+      # in acm-clusters-overview.yaml and the fleet_overview panel in
+      # acm-fleet-overview.yaml.
+      # ------------------------------------------------------------------
+      memory_appnamespaces:
+        kind: Panel
+        spec:
+          display:
+            name: Memory - Application Namespaces Requests and Limits
+            description: Memory - Application Namespaces Requests and Limits
+          plugin:
+            kind: Table
+            spec:
+              columnSettings:
+                - name: namespace
+                  header: Namespace
+                - name: value
+                  header: Total Pods
+                - name: memory_used
+                  header: Memory Used
+                  format: { unit: bytes }
+                  cellSettings: &naCellSettings
+                    - condition: { kind: Value, spec: { value: "-1" } }
+                      text: "N/A"
+                      backgroundColor: "#8e8e8e"
+                - name: memory_requested
+                  header: Memory Requested
+                  format: { unit: bytes }
+                  cellSettings: *naCellSettings
+                - name: memory_limits
+                  header: Memory Limits
+                  format: { unit: bytes }
+                  cellSettings: *naCellSettings
+                - name: memory_used_requested_pct
+                  header: "Memory Used : Memory Requested Percentage"
+                  format: { unit: percent-decimal, decimalPlaces: 1 }
+                  width: 152
+                  cellSettings: *naCellSettings
+                - name: memory_used_limits_pct
+                  header: "Memory Used : Memory Limits Percentage"
+                  format: { unit: percent-decimal, decimalPlaces: 1 }
+                  cellSettings: *naCellSettings
+                - name: timestamp
+                  hide: true
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    # count(kube_pod_owner) by (cluster,namespace) * 0 - 1 is
+                    # the "N/A anchor": kube_pod_owner is confirmed present
+                    # for every namespace this panel shows, so it's a safe
+                    # base to fall back to (always -1) when a joined metric
+                    # is missing for that specific namespace.
+                    query: |-
+                      sum(kube_pod_owner{cluster="$cluster",namespace!~$appns}) by $byvalue
+                      * on $byvalue group_left (memory_used)
+                        count_values without () (
+                          "memory_used",
+                          (sum(container_memory_rss:sum{cluster="$cluster", container!="",namespace!~$appns}) by $byvalue) or on $byvalue ((count(kube_pod_owner{cluster="$cluster",namespace!~$appns}) by $byvalue * 0) - 1)
+                        )
+                      * on $byvalue group_left (memory_requested)
+                        count_values without () (
+                          "memory_requested",
+                          (sum(kube_pod_container_resource_requests:sum{cluster="$cluster",resource="memory",namespace!~$appns}) by $byvalue) or on $byvalue ((count(kube_pod_owner{cluster="$cluster",namespace!~$appns}) by $byvalue * 0) - 1)
+                        )
+                      * on $byvalue group_left (memory_limits)
+                        count_values without () (
+                          "memory_limits",
+                          (sum(kube_pod_container_resource_limits:sum{cluster="$cluster",resource="memory",namespace!~$appns}) by $byvalue) or on $byvalue ((count(kube_pod_owner{cluster="$cluster",namespace!~$appns}) by $byvalue * 0) - 1)
+                        )
+                      * on $byvalue group_left (memory_used_requested_pct)
+                        count_values without () (
+                          "memory_used_requested_pct",
+                          (sum(container_memory_rss:sum{cluster="$cluster", container!="",namespace!~$appns}) by $byvalue / sum(kube_pod_container_resource_requests:sum{cluster="$cluster", resource="memory",namespace!~$appns}) by $byvalue) or on $byvalue ((count(kube_pod_owner{cluster="$cluster",namespace!~$appns}) by $byvalue * 0) - 1)
+                        )
+                      * on $byvalue group_left (memory_used_limits_pct)
+                        count_values without () (
+                          "memory_used_limits_pct",
+                          (sum(container_memory_rss:sum{cluster="$cluster", container!="",namespace!~$appns}) by $byvalue / sum(kube_pod_container_resource_limits:sum{cluster="$cluster", resource="memory",namespace!~$appns}) by $byvalue) or on $byvalue ((count(kube_pod_owner{cluster="$cluster",namespace!~$appns}) by $byvalue * 0) - 1)
+                        )
+
+      cpu_appnamespaces:
+        kind: Panel
+        spec:
+          display:
+            name: CPU - Application Namespaces Requests and Limits
+            description: CPU - Application Namespaces Requests and Limits
+          plugin:
+            kind: Table
+            spec:
+              columnSettings:
+                - name: namespace
+                  header: Namespace
+                - name: value
+                  header: Total Pods
+                - name: cpu_used
+                  header: CPU Used
+                  format: { unit: decimal, decimalPlaces: 2 }
+                  cellSettings: *naCellSettings
+                - name: cpu_requested
+                  header: CPU Requested
+                  format: { unit: decimal, decimalPlaces: 2 }
+                  cellSettings: *naCellSettings
+                - name: cpu_limits
+                  header: CPU Limits
+                  format: { unit: decimal, decimalPlaces: 2 }
+                  cellSettings: *naCellSettings
+                - name: cpu_used_requested_pct
+                  header: "CPU Used : CPU Requested Percentage"
+                  format: { unit: percent-decimal, decimalPlaces: 1 }
+                  cellSettings: *naCellSettings
+                - name: cpu_used_limits_pct
+                  header: "CPU Used : CPU Limits Percentage"
+                  format: { unit: percent-decimal, decimalPlaces: 1 }
+                  cellSettings: *naCellSettings
+                - name: timestamp
+                  hide: true
+          queries:
+            - kind: TimeSeriesQuery
+              spec:
+                plugin:
+                  kind: PrometheusTimeSeriesQuery
+                  spec:
+                    datasource: { kind: PrometheusDatasource, name: dynamic-fleet-thanos-datasource }
+                    query: |-
+                      sum(kube_pod_owner{cluster="$cluster",namespace!~$appns}) by $byvalue
+                      * on $byvalue group_left (cpu_used)
+                        count_values without () (
+                          "cpu_used",
+                          (sum(rate(container_cpu_usage_seconds_total{cluster="$cluster",namespace!~$appns}[15m])) by $byvalue) or on $byvalue ((count(kube_pod_owner{cluster="$cluster",namespace!~$appns}) by $byvalue * 0) - 1)
+                        )
+                      * on $byvalue group_left (cpu_requested)
+                        count_values without () (
+                          "cpu_requested",
+                          (sum(kube_pod_container_resource_requests:sum{cluster="$cluster",resource="cpu",namespace!~$appns}) by $byvalue) or on $byvalue ((count(kube_pod_owner{cluster="$cluster",namespace!~$appns}) by $byvalue * 0) - 1)
+                        )
+                      * on $byvalue group_left (cpu_limits)
+                        count_values without () (
+                          "cpu_limits",
+                          (sum(kube_pod_container_resource_limits:sum{cluster="$cluster",resource="cpu",namespace!~$appns}) by $byvalue) or on $byvalue ((count(kube_pod_owner{cluster="$cluster",namespace!~$appns}) by $byvalue * 0) - 1)
+                        )
+                      * on $byvalue group_left (cpu_used_requested_pct)
+                        count_values without () (
+                          "cpu_used_requested_pct",
+                          (sum(rate(container_cpu_usage_seconds_total{cluster="$cluster",namespace!~$appns}[15m])) by $byvalue / sum(kube_pod_container_resource_requests:sum{cluster="$cluster",resource="cpu",namespace!~$appns}) by $byvalue) or on $byvalue ((count(kube_pod_owner{cluster="$cluster",namespace!~$appns}) by $byvalue * 0) - 1)
+                        )
+                      * on $byvalue group_left (cpu_used_limits_pct)
+                        count_values without () (
+                          "cpu_used_limits_pct",
+                          (sum(rate(container_cpu_usage_seconds_total{cluster="$cluster",namespace!~$appns}[15m])) by $byvalue / sum(kube_pod_container_resource_limits:sum{cluster="$cluster",resource="cpu",namespace!~$appns}) by $byvalue) or on $byvalue ((count(kube_pod_owner{cluster="$cluster",namespace!~$appns}) by $byvalue * 0) - 1)
+                        )
+
+    layouts:
+      - kind: Grid
+        spec:
+          display:
+            title: Panel Group 1
+          items:
+            - x: 0
+              "y": 0
+              width: 12
+              height: 8
+              content:
+                $ref: "#/spec/panels/memory_appnamespaces"
+            - x: 12
+              "y": 0
+              width: 12
+              height: 8
+              content:
+                $ref: "#/spec/panels/cpu_appnamespaces"
